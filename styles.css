@@ -1,16 +1,18 @@
 :root {
   color-scheme: light;
-  --bg: #f4f6f3;
+  --bg: #f0faf6;
   --surface: #fff;
-  --ink: #172d27;
-  --muted: #61736b;
-  --line: #dce5dd;
-  --accent: #146b52;
-  --soft: #e7f1e9;
+  --ink: #173b30;
+  --muted: #58786d;
+  --line: #d1eade;
+  --accent: #24745b;
+  --soft: #def6ea;
+  --primary: #a5e8c9;
+  --on-primary: #173b30;
   --warn: #805000;
   --warnbg: #fff3d8;
   --danger: #a83232;
-  --shadow: 0 8px 30px #193e2410;
+  --shadow: 0 8px 30px #184e3b10;
   font-family:
     system-ui,
     -apple-system,
@@ -88,8 +90,8 @@ a {
   place-items: center;
   width: 35px;
   height: 35px;
-  background: var(--accent);
-  color: white;
+  background: var(--primary);
+  color: var(--on-primary);
   border-radius: 11px;
   font-size: 27px;
 }
@@ -214,9 +216,9 @@ small {
   flex-wrap: wrap;
 }
 .primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
 }
 .hero .primary {
   flex: 1;
@@ -591,40 +593,40 @@ th:first-child {
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #101c18;
-    --surface: #192923;
-    --ink: #e6eee8;
-    --muted: #a1b5a8;
-    --line: #30443a;
-    --accent: #87d6ac;
-    --soft: #243f30;
+    --bg: #101f1a;
+    --surface: #192f26;
+    --ink: #e6f6ee;
+    --muted: #aacabc;
+    --line: #345247;
+    --accent: #a5e8c9;
+    --soft: #234638;
     --warn: #f1cf8a;
     --warnbg: #41351e;
     --danger: #ff9999;
     --shadow: none;
   }
   :root:not([data-theme="light"]) .primary {
-    background: #23805b;
-    color: #fff;
-    border-color: #23805b;
+    background: var(--primary);
+    color: var(--on-primary);
+    border-color: var(--primary);
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #101c18;
-  --surface: #192923;
-  --ink: #e6eee8;
-  --muted: #a1b5a8;
-  --line: #30443a;
-  --accent: #87d6ac;
-  --soft: #243f30;
+  --bg: #101f1a;
+  --surface: #192f26;
+  --ink: #e6f6ee;
+  --muted: #aacabc;
+  --line: #345247;
+  --accent: #a5e8c9;
+  --soft: #234638;
   --warn: #f1cf8a;
   --warnbg: #41351e;
   --danger: #ff9999;
   --shadow: none;
 }
 :root[data-theme="dark"] .primary {
-  background: #23805b;
-  color: #fff;
-  border-color: #23805b;
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
 }

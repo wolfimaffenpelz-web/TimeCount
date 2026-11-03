@@ -61,6 +61,43 @@ try {
       true,
     );
   });
+  await check("Gleitzeitkonto zählt nur bis heute, Wochenziel bleibt vollständig", async () => {
+    for (const [date, expected] of [
+      ["2026-11-02", "−04:24"],
+      ["2026-11-04", "−17:12"],
+      ["2026-11-08", "−20:00"],
+    ]) {
+      const balanceContext = await browser.newContext({ timezoneId: "Europe/Berlin" });
+      try {
+        const balancePage = await balanceContext.newPage();
+        await balancePage.clock.setFixedTime(new Date(date + "T12:00:00+01:00"));
+        await balancePage.goto(origin);
+        await balancePage.locator('[data-live="balance"]').waitFor();
+        await balancePage.evaluate(async () => {
+          const { update } = await import("/src/db.js");
+          await update((d) => {
+            d.initial.date = "2026-11-02";
+            d.initial.amountMs = 2 * 3600000;
+            d.adjustments.push({
+              id: crypto.randomUUID(),
+              date: "2026-11-06",
+              amountMs: 10 * 3600000,
+              comment: "Künftige Anpassung",
+              modifiedAt: Date.now(),
+            });
+          });
+        });
+        await balancePage.reload();
+        await balancePage.locator('[data-live="balance"]').waitFor();
+        assert.equal(await balancePage.locator('[data-live="balance"]').textContent(), expected);
+        assert.equal(await balancePage.locator('[data-live="week"]').textContent(), "−32:00");
+        assert.equal(await balancePage.locator('[data-live="remaining"]').textContent(), "32:00");
+        await balancePage.getByText("Stunden · bis einschließlich heute", { exact: true }).waitFor();
+      } finally {
+        await balanceContext.close();
+      }
+    }
+  });
   await check("Start und persistente Erfassung nach Reload", async () => {
     await page
       .getByRole("button", { name: "Arbeit starten", exact: true })
@@ -520,7 +557,7 @@ try {
         fullPage: true,
       });
       const assets = await page.evaluate(async () => {
-        const c = await caches.open("timecount-v1");
+        const c = await caches.open("timecount-v3");
         return (await c.keys()).length;
       });
       assert.equal(assets, 11);
