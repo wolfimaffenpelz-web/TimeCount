@@ -807,7 +807,7 @@ async function offlineStatus() {
   const el = $("#offline-status");
   if (!el) return;
   try {
-    const cache = await caches.open("timecount-v2");
+    const cache = await caches.open("timecount-v3");
     const files = await cache.keys();
     el.textContent =
       files.length >= 10

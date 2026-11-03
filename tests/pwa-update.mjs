@@ -24,7 +24,7 @@ export async function testUpdate(browser) {
       let content = await readFile(file);
       if (file.endsWith(".js"))
         content = Buffer.from(
-          content.toString().replaceAll("timecount-v2", "timecount-" + release),
+          content.toString().replaceAll("timecount-v3", "timecount-" + release),
         );
       res.writeHead(200, {
         "Content-Type": types[path.extname(file)] || "text/plain",

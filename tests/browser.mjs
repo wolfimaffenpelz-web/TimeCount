@@ -557,7 +557,7 @@ try {
         fullPage: true,
       });
       const assets = await page.evaluate(async () => {
-        const c = await caches.open("timecount-v2");
+        const c = await caches.open("timecount-v3");
         return (await c.keys()).length;
       });
       assert.equal(assets, 11);
