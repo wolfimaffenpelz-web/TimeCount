@@ -1,4 +1,4 @@
-const CACHE = "timecount-v1";
+const CACHE = "timecount-v2";
 const ASSETS = [
   "./",
   "./index.html",
