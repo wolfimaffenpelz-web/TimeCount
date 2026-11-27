@@ -407,3 +407,40 @@ test("regionale Änderung und Overrides verwenden keine veralteten Feiertagswert
   d.overrides.push({ id: "o", date: "2026-03-08", kind: "remove", name: "" });
   assert.equal(C.holiday(d, "2026-03-08"), null);
 });
+
+test("Gleitzeitkonto lässt Ist, Soll und Anpassungen von heute aus", () => {
+  const d = fresh();
+  const next = C.addDays(D, 1);
+  const now = new Date(next + "T12:00:00").getTime();
+  block(d, 5);
+  block(d, 2, { date: next });
+  d.adjustments.push({ id: "today", date: next, amountMs: H });
+  assert.equal(C.balance(d, next, now), 5 * H - 6.4 * H);
+  assert.equal(C.balance(d, C.addDays(next, 1), now + 24 * H),
+    8 * H - 12.8 * H);
+});
+
+test("Automatisches Ende zählt frühere Blöcke und zieht echte Pausen ab", () => {
+  const d = fresh();
+  block(d, 3);
+  const current = block(d, 0, { start: 16, pause: 90, open: true });
+  const end = current.start + 8.5 * H;
+  assert.equal(C.automaticEnd(d, end - 1), null);
+  assert.equal(C.automaticEnd(d, end), end);
+  C.stopAutomatically(d, end + 16 * H);
+  assert.equal(current.end, end);
+  assert.equal(current.autoStop, "pending");
+  assert.equal(C.day(d, D).raw, 10 * H);
+  assert.equal(C.parseBackup(C.backup(d)).sessions[1].autoStop, "pending");
+  assert.equal(C.automaticEnd(d, end + 24 * H), null);
+});
+
+test("Eine laufende Pause allein löst keinen automatischen Abschluss aus", () => {
+  const d = fresh();
+  const current = block(d, 0, { open: true, pause: 30 });
+  const pause = d.breaks[0];
+  pause.end = null;
+  assert.equal(C.automaticEnd(d, current.start + 20 * H), null);
+  assert.equal(C.hasClockConflict(d, pause.start - 1), true);
+  assert.equal(C.hasClockConflict(d, pause.start + 12 * H), false);
+});

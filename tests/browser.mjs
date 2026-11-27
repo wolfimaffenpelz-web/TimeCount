@@ -61,10 +61,10 @@ try {
       true,
     );
   });
-  await check("Gleitzeitkonto zählt nur bis heute, Wochenziel bleibt vollständig", async () => {
+  await check("Gleitzeitkonto zählt nur bis gestern, Wochenziel bleibt vollständig", async () => {
     for (const [date, expected] of [
-      ["2026-11-02", "−04:24"],
-      ["2026-11-04", "−17:12"],
+      ["2026-11-02", "+02:00"],
+      ["2026-11-04", "−10:48"],
       ["2026-11-08", "−20:00"],
     ]) {
       const balanceContext = await browser.newContext({ timezoneId: "Europe/Berlin" });
@@ -85,6 +85,7 @@ try {
               comment: "Künftige Anpassung",
               modifiedAt: Date.now(),
             });
+            return d;
           });
         });
         await balancePage.reload();
@@ -92,10 +93,58 @@ try {
         assert.equal(await balancePage.locator('[data-live="balance"]').textContent(), expected);
         assert.equal(await balancePage.locator('[data-live="week"]').textContent(), "−32:00");
         assert.equal(await balancePage.locator('[data-live="remaining"]').textContent(), "32:00");
-        await balancePage.getByText("Stunden · bis einschließlich heute", { exact: true }).waitFor();
+        await balancePage.getByText("Stunden · bis einschließlich gestern", { exact: true }).waitFor();
       } finally {
         await balanceContext.close();
       }
+    }
+  });
+  await check("Vergessenen Arbeitsblock beim nächsten Start prüfen", async () => {
+    const reviewContext = await browser.newContext({ timezoneId: "Europe/Berlin" });
+    try {
+      const reviewPage = await reviewContext.newPage();
+      await reviewPage.clock.setFixedTime(new Date("2026-11-02T08:00:00+01:00"));
+      await reviewPage.goto(origin);
+      await reviewPage.getByRole("button", { name: "Arbeit starten", exact: true }).click();
+      await reviewPage.getByText("Arbeit läuft", { exact: true }).waitFor();
+      await reviewPage.close();
+
+      const reopened = await reviewContext.newPage();
+      await reopened.clock.setFixedTime(new Date("2026-11-03T08:00:00+01:00"));
+      await reopened.goto(origin);
+      const popup = reopened.getByRole("dialog");
+      await popup.getByRole("heading", { name: "Arbeitstag automatisch beendet" }).waitFor();
+      await popup.getByRole("button", { name: "Zehn Stunden bestätigen" }).click();
+      await popup.waitFor({ state: "hidden" });
+      const session = await reopened.evaluate(async () => {
+        const { load } = await import("/src/db.js");
+        return (await load()).data.sessions[0];
+      });
+      assert.equal(session.end - session.start, 10 * 3600000);
+      assert.equal(session.autoStop, "reviewed");
+      await reopened.reload();
+      await reopened.getByText("Nicht gestartet", { exact: true }).waitFor();
+      assert.equal(await popup.isVisible(), false);
+      await reopened.getByRole("button", { name: "Arbeit starten", exact: true }).click();
+      await reopened.getByText("Arbeit läuft", { exact: true }).waitFor();
+      await reopened.close();
+
+      const correction = await reviewContext.newPage();
+      await correction.clock.setFixedTime(new Date("2026-11-04T08:00:00+01:00"));
+      await correction.goto(origin);
+      const editor = correction.getByRole("dialog");
+      await editor.getByRole("button", { name: "Zeit korrigieren" }).click();
+      await editor.getByLabel("Arbeitsende", { exact: false }).fill("2026-11-03T16:00");
+      await editor.getByRole("button", { name: "Arbeitsblock speichern" }).click();
+      await editor.waitFor({ state: "hidden" });
+      const corrected = await correction.evaluate(async () => {
+        const { load } = await import("/src/db.js");
+        return (await load()).data.sessions.find((session) => session.date === "2026-11-03");
+      });
+      assert.equal(corrected.end - corrected.start, 8 * 3600000);
+      assert.equal(corrected.autoStop, "reviewed");
+    } finally {
+      await reviewContext.close();
     }
   });
   await check("Start und persistente Erfassung nach Reload", async () => {
@@ -557,7 +606,7 @@ try {
         fullPage: true,
       });
       const assets = await page.evaluate(async () => {
-        const c = await caches.open("timecount-v3");
+        const c = await caches.open("timecount-v4");
         return (await c.keys()).length;
       });
       assert.equal(assets, 11);

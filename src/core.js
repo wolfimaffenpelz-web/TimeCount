@@ -271,17 +271,63 @@ export function period(d, from, to, now = Date.now()) {
   return result;
 }
 export function balance(d, through, now = Date.now()) {
-  if (through < d.initial.date) return null;
-  const p = period(d, d.initial.date, through, now);
+  const today = dateKey(new Date(now));
+  if (through < d.initial.date || today < d.initial.date) return null;
+  const yesterday = addDays(today, -1);
+  const p = period(d, d.initial.date, through < yesterday ? through : yesterday, now);
   return d.initial.amountMs + p.saldo + p.adjustments;
 }
+export function hasClockConflict(d, now = Date.now()) {
+  const current = activeSession(d);
+  return Boolean(current && (
+    now < current.start ||
+    d.breaks.some((b) => b.sessionId === current.id && now < (b.end ?? b.start))
+  ));
+}
+
+export function automaticEnd(d, now = Date.now()) {
+  const current = activeSession(d);
+  if (!current || now <= current.start || hasClockConflict(d, now)) return null;
+  const elapsed = day(d, current.date, now);
+  const working = elapsed.rows.find((r) => r.session.id === current.id).raw;
+  // A manually restarted block after reaching the limit can still be tracked.
+  const remaining = 10 * HOUR - (elapsed.raw - working);
+  if (remaining <= 0 || working < remaining) return null;
+  let end = current.start + remaining;
+  const pauses = d.breaks
+    .filter((b) => b.sessionId === current.id)
+    .sort((a, b) => a.start - b.start);
+  for (const pause of pauses) {
+    if (pause.start >= end) break;
+    if (pause.end === null) return null;
+    end += pause.end - pause.start;
+  }
+  return end <= now ? end : null;
+}
+
+export function stopAutomatically(d, now = Date.now()) {
+  const end = automaticEnd(d, now);
+  if (end === null) return d;
+  const current = activeSession(d);
+  current.end = end;
+  current.modifiedAt = now;
+  current.autoStop = "pending";
+  d.breaks = d.breaks.filter((b) => b.sessionId !== current.id || b.start < end);
+  for (const b of d.breaks) {
+    if (b.sessionId === current.id && (b.end === null || b.end > end)) {
+      b.end = end;
+      b.modifiedAt = now;
+    }
+  }
+  return d;
+}
+
 export function transition(d, action, now = Date.now()) {
   const current = activeSession(d);
   if (
     current &&
     (dateKey(new Date(now)) !== current.date ||
-      now < current.start ||
-      d.breaks.some((b) => b.sessionId === current.id && now < b.start))
+      hasClockConflict(d, now))
   )
     throw Error(
       "Datum oder Uhrzeit passt nicht zur laufenden Erfassung. Bitte den Tag im Kalender korrigieren.",
@@ -405,6 +451,8 @@ export function validate(d) {
       !validDate(s.date) ||
       !ts(s.start) ||
       (s.end !== null && (!ts(s.end) || s.end <= s.start)) ||
+      (s.autoStop !== undefined &&
+        (s.end === null || !["pending", "reviewed"].includes(s.autoStop))) ||
       !Number.isFinite(s.factor) ||
       s.factor <= 0 ||
       s.factor > 1000 ||
@@ -423,7 +471,7 @@ export function validate(d) {
       const zone = s.timeZone ?? d.settings.timeZone;
       if (zonedDate(s.start, zone) !== s.date)
         fail("Das Datum eines Arbeitsblocks passt nicht zu seinem Beginn.");
-      if (s.end !== null && zonedDate(s.end, zone) !== s.date)
+      if (s.end !== null && !s.autoStop && zonedDate(s.end, zone) !== s.date)
         fail(
           "Beendete Arbeitsblöcke über Mitternacht bitte in getrennte Tage aufteilen.",
         );
