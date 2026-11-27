@@ -55,9 +55,7 @@ let data,
   noticeTimer;
 let trackUntil = 0;
 let updateRequested = false;
-let clockWarning = false,
-  baseClock = Date.now(),
-  baseMono = performance.now();
+const shownReviews = new Set();
 const channel =
   "BroadcastChannel" in window ? new BroadcastChannel("timecount") : null;
 function notify(message, error = false) {
@@ -95,6 +93,7 @@ async function refresh() {
         );
       else render();
     }
+    await checkAutomaticEnd();
   } catch (e) {
     err(e);
   }
@@ -121,7 +120,7 @@ async function save(
     ({ data, revision } = await update(change, expected));
     channel?.postMessage({ revision });
     if (close) dialog.close();
-    render();
+    if (close || !app.querySelector('form[data-dirty="true"]')) render();
     notify(message);
     return true;
   } catch (e) {
@@ -158,6 +157,28 @@ function modal(html) {
   body.querySelector("input,select,button")?.focus();
 }
 $("#close-dialog").onclick = () => dialog.close();
+dialog.addEventListener("close", showAutomaticReview);
+function showAutomaticReview() {
+  if (!data || busy || dialog.open || document.hidden) return;
+  const session = data.sessions.find(
+    (s) => s.autoStop === "pending" && !shownReviews.has(s.id),
+  );
+  if (!session) return;
+  shownReviews.add(session.id);
+  modal(
+    `<h2 id="dialog-title">Arbeitstag automatisch beendet</h2><p>Die Erfassung für ${esc(nice(session.date))} wurde nach zehn Stunden tatsächlicher Arbeit beendet. Bitte bestätige die Zeit oder korrigiere den letzten Arbeitsblock.</p><div class="actions"><button class="primary" data-action="auto-confirm" data-id="${esc(session.id)}">Zehn Stunden bestätigen</button><button data-action="auto-edit" data-id="${esc(session.id)}">Zeit korrigieren</button></div>`,
+  );
+}
+async function checkAutomaticEnd(now = Date.now()) {
+  if (!data || busy || updateRequested) return false;
+  const ended = C.automaticEnd(data, now) !== null &&
+    await save((d) => C.stopAutomatically(d, now), {
+      close: false,
+      message: "Arbeitstag automatisch beendet.",
+    });
+  showAutomaticReview();
+  return ended;
+}
 function metric(label, value, key) {
   return `<div class="metric"><strong ${key ? `data-live="${key}"` : ""}>${esc(value)}</strong><span>${label}</span></div>`;
 }
@@ -214,7 +235,7 @@ function todayPage() {
   const old = a && a.date !== today();
   return (
     intro("Dein Arbeitsalltag", "Deine Zeit. Im Blick.", esc(nice(today()))) +
-    `<div id="clock-warning">${warnings()}</div><section class="card hero" aria-label="Heutige Erfassung"><div class="row"><span class="status">${status}</span><button class="ghost" data-action="day" data-date="${today()}">Tag bearbeiten</button></div><div class="timer" data-live="actual">${v.actual}</div><div class="timer-label">Heute tatsächlich gearbeitet</div><div class="metrics">${metric("Angerechnet", v.credited, "credited")}${metric("Erfasste Pausen", v.pause, "pause")}${metric(b ? "Laufende Pause" : "Zusatzabzug", b ? v.currentPause : v.deduction, b ? "currentPause" : "deduction")}</div><div class="actions"><button class="primary" data-action="track" data-track="${action}" ${old ? "disabled" : ""}>${label}</button>${a && !b ? '<button class="secondary" data-action="track" data-track="pause">Pause starten</button>' : ""}${b ? '<button data-action="track" data-track="stop">Arbeit beenden</button>' : ""}</div><p class="note">${a ? `Beginn ${esc(a.date)} · ${time(a.start)} · Zustand ist auf diesem Gerät gespeichert.` : "Ein Klick genügt. Deine Zeiten bleiben auf diesem Gerät."}</p></section><div class="grid2"><section class="card"><div class="row"><h2>Gleitzeitkonto</h2><span class="badge">Vorläufig</span></div><div class="balance" data-live="balance">${v.balance}</div><p class="subtle">Stunden · bis einschließlich heute</p><p class="note">Anfangssaldo ab ${esc(data.initial.date)}. Berücksichtigt werden Arbeitszeiten, bereinigtes Soll und Saldoanpassungen bis einschließlich heute.</p></section><section class="card"><div class="row"><h2>Diese Woche</h2><span class="badge">Mo – So</span></div>${line("Bereinigtes Wochenziel", f(week.target))}${line("Wochensaldo", v.week).replace("<strong>", '<strong data-live="week">')}${line("Noch bis zum Wochenziel", v.remaining).replace("<strong>", '<strong data-live="remaining">')}<progress value="${Math.min(week.credited, week.target)}" max="${week.target || 1}" aria-label="Erreichtes Wochenziel"></progress></section></div><section class="card"><div class="row"><h2>Heutige Arbeitsblöcke</h2><button class="ghost" data-action="day" data-date="${today()}">Details & Korrekturen</button></div>${x.rows.length ? x.rows.map((r) => `<div class="line-item"><span>${time(r.session.start)} – ${time(r.session.end)} ${r.session.factor !== 1 ? `<span class="badge">× ${r.session.factor}</span>` : ""}</span><strong>${f(r.raw)}</strong></div>`).join("") : '<p class="empty">Noch keine Arbeitszeit. Bereit, wenn du es bist.</p>'}<p class="note">${x.deduction ? "Der Mindestpausenabzug ist eine rechnerische Korrektur, keine tatsächlich genommene Pause." : "Echte Pausen werden gespeichert. Fehlende Mindestpausen werden separat berechnet."}</p></section>`
+    `<div id="clock-warning">${warnings()}</div><section class="card hero" aria-label="Heutige Erfassung"><div class="row"><span class="status">${status}</span><button class="ghost" data-action="day" data-date="${today()}">Tag bearbeiten</button></div><div class="timer" data-live="actual">${v.actual}</div><div class="timer-label">Heute tatsächlich gearbeitet</div><div class="metrics">${metric("Angerechnet", v.credited, "credited")}${metric("Erfasste Pausen", v.pause, "pause")}${metric(b ? "Laufende Pause" : "Zusatzabzug", b ? v.currentPause : v.deduction, b ? "currentPause" : "deduction")}</div><div class="actions"><button class="primary" data-action="track" data-track="${action}" ${old ? "disabled" : ""}>${label}</button>${a && !b ? '<button class="secondary" data-action="track" data-track="pause">Pause starten</button>' : ""}${b ? '<button data-action="track" data-track="stop">Arbeit beenden</button>' : ""}</div><p class="note">${a ? `Beginn ${esc(a.date)} · ${time(a.start)} · Zustand ist auf diesem Gerät gespeichert.` : "Ein Klick genügt. Deine Zeiten bleiben auf diesem Gerät."}</p></section><div class="grid2"><section class="card"><div class="row"><h2>Gleitzeitkonto</h2></div><div class="balance" data-live="balance">${v.balance}</div><p class="subtle">Stunden · bis einschließlich gestern</p><p class="note">Anfangssaldo ab ${esc(data.initial.date)}. Berücksichtigt werden Arbeitszeiten, bereinigtes Soll und Saldoanpassungen bis einschließlich gestern.</p></section><section class="card"><div class="row"><h2>Diese Woche</h2><span class="badge">Mo – So</span></div>${line("Bereinigtes Wochenziel", f(week.target))}${line("Wochensaldo", v.week).replace("<strong>", '<strong data-live="week">')}${line("Noch bis zum Wochenziel", v.remaining).replace("<strong>", '<strong data-live="remaining">')}<progress value="${Math.min(week.credited, week.target)}" max="${week.target || 1}" aria-label="Erreichtes Wochenziel"></progress></section></div><section class="card"><div class="row"><h2>Heutige Arbeitsblöcke</h2><button class="ghost" data-action="day" data-date="${today()}">Details & Korrekturen</button></div>${x.rows.length ? x.rows.map((r) => `<div class="line-item"><span>${time(r.session.start)} – ${time(r.session.end)} ${r.session.factor !== 1 ? `<span class="badge">× ${r.session.factor}</span>` : ""}</span><strong>${f(r.raw)}</strong></div>`).join("") : '<p class="empty">Noch keine Arbeitszeit. Bereit, wenn du es bist.</p>'}<p class="note">${x.deduction ? "Der Mindestpausenabzug ist eine rechnerische Korrektur, keine tatsächlich genommene Pause." : "Echte Pausen werden gespeichert. Fehlende Mindestpausen werden separat berechnet."}</p></section>`
   );
 }
 function warnings() {
@@ -225,9 +246,9 @@ function warnings() {
     text.push(
       `Die Erfassung vom ${a.date} läuft über Mitternacht. Sie bleibt vollständig diesem Tag zugeordnet. Bitte Beginn, Ende und Pausen korrigieren.`,
     );
-  if ((a && Date.now() < a.start) || clockWarning)
+  if (C.hasClockConflict(data))
     text.push(
-      "Die Systemuhr hat sich verändert. Bitte prüfe die Gerätezeit und korrigiere betroffene Einträge.",
+      "Die Gerätezeit liegt vor einem Zeitstempel der laufenden Erfassung. Bitte prüfe die Uhrzeit und korrigiere betroffene Einträge.",
     );
   if (
     data.settings.timeZone !== Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -288,7 +309,7 @@ function reportPage() {
       "Was deine Zeit ergibt",
       "Nachvollziehbar aus deinen Einträgen berechnet.",
     ) +
-    `<section class="card"><div class="row"><h2>Wochenübersicht</h2>${we >= today() ? '<span class="badge">Vorläufig</span>' : ""}</div><div class="toolbar"><button data-action="week" data-step="-1" aria-label="Vorherige Woche">←</button><label for="report-week">Woche ab Montag</label><input id="report-week" type="date" min="1970-01-01" max="2199-12-24" value="${reportWeek}"><button data-action="week" data-step="1" aria-label="Nächste Woche">→</button></div><p class="subtle">${reportWeek} – ${we}</p>${line("Ursprüngliches Wochensoll", f(w.original))}${line("Entlastung durch Abwesenheiten / Feiertage", f(w.reduction))}${line("Bereinigtes Wochensoll", f(w.target))}${line("Tatsächlich gearbeitet (ohne echte Pausen)", f(w.raw))}${line("Rechnerischer Zusatzabzug", f(w.deduction))}${line("Netto nach Zusatzabzug", f(w.net))}${line("Angerechnete Arbeit", f(w.credited))}${line("Wochensaldo", f(w.saldo, true))}${line("Separate Saldoanpassungen", f(w.adjustments, true))}</section><section class="card"><div class="row"><h2>Monatsübersicht</h2>${to >= today() ? '<span class="badge">Vorläufig</span>' : ""}<label class="sr-only" for="report-month">Auswertungsmonat</label><input id="report-month" type="month" min="1970-01" max="2199-12" value="${reportMonth}"></div><div class="metrics">${metric("Tatsächlich", f(m.raw))}${metric("Angerechnet", f(m.credited))}${metric("Bereinigtes Soll", f(m.target))}</div>${line("Saldo aus Arbeitszeit und Soll", f(m.saldo, true))}${line("Separate Saldoanpassungen", f(m.adjustments, true))}${line("Saldoveränderung gesamt", f(m.saldo + m.adjustments, true))}${line("Gleitzeitkonto zum Monatsende", bal === null ? "Vor Anfangsstichtag" : f(bal, true))}${line("Urlaubstage", m.vacation)}${line("Krankheitstage", m.sick)}<p class="note">Monatswerte sind taggenau zugeordnet. Der Kontostand beginnt am Anfangsstichtag; Monatswerte zeigen den ganzen Monat. Bei laufenden und zukünftigen Monaten ist das volle Monatssoll enthalten und der Wert vorläufig.</p></section><section class="card"><h2>Export für deine Unterlagen</h2><form id="csv-form"><div class="fields"><div><label for="csv-from">Von</label><input id="csv-from" name="from" type="date" value="${from}" required></div><div><label for="csv-to">Bis</label><input id="csv-to" name="to" type="date" value="${to}" required></div></div><div class="actions"><button type="submit" class="secondary">CSV herunterladen</button></div></form><p class="note">UTF-8 mit BOM · Semikolon · Zeitstempel in UTC, Zeitdauern in HH:MM.</p></section>`
+    `<section class="card"><div class="row"><h2>Wochenübersicht</h2>${we >= today() ? '<span class="badge">Vorläufig</span>' : ""}</div><div class="toolbar"><button data-action="week" data-step="-1" aria-label="Vorherige Woche">←</button><label for="report-week">Woche ab Montag</label><input id="report-week" type="date" min="1970-01-01" max="2199-12-24" value="${reportWeek}"><button data-action="week" data-step="1" aria-label="Nächste Woche">→</button></div><p class="subtle">${reportWeek} – ${we}</p>${line("Ursprüngliches Wochensoll", f(w.original))}${line("Entlastung durch Abwesenheiten / Feiertage", f(w.reduction))}${line("Bereinigtes Wochensoll", f(w.target))}${line("Tatsächlich gearbeitet (ohne echte Pausen)", f(w.raw))}${line("Rechnerischer Zusatzabzug", f(w.deduction))}${line("Netto nach Zusatzabzug", f(w.net))}${line("Angerechnete Arbeit", f(w.credited))}${line("Wochensaldo", f(w.saldo, true))}${line("Separate Saldoanpassungen", f(w.adjustments, true))}</section><section class="card"><div class="row"><h2>Monatsübersicht</h2>${to >= today() ? '<span class="badge">Vorläufig</span>' : ""}<label class="sr-only" for="report-month">Auswertungsmonat</label><input id="report-month" type="month" min="1970-01" max="2199-12" value="${reportMonth}"></div><div class="metrics">${metric("Tatsächlich", f(m.raw))}${metric("Angerechnet", f(m.credited))}${metric("Bereinigtes Soll", f(m.target))}</div>${line("Saldo aus Arbeitszeit und Soll", f(m.saldo, true))}${line("Separate Saldoanpassungen", f(m.adjustments, true))}${line("Saldoveränderung gesamt", f(m.saldo + m.adjustments, true))}${line(to >= today() ? "Gleitzeitkonto bis gestern" : "Gleitzeitkonto zum Monatsende", bal === null ? "Vor Anfangsstichtag" : f(bal, true))}${line("Urlaubstage", m.vacation)}${line("Krankheitstage", m.sick)}<p class="note">Monatswerte sind taggenau zugeordnet. Der Kontostand beginnt am Anfangsstichtag; Monatswerte zeigen den ganzen Monat. Monatssoll und Monatswerte sind für laufende und zukünftige Monate vorläufig.</p></section><section class="card"><h2>Export für deine Unterlagen</h2><form id="csv-form"><div class="fields"><div><label for="csv-from">Von</label><input id="csv-from" name="from" type="date" value="${from}" required></div><div><label for="csv-to">Bis</label><input id="csv-to" name="to" type="date" value="${to}" required></div></div><div class="actions"><button type="submit" class="secondary">CSV herunterladen</button></div></form><p class="note">UTF-8 mit BOM · Semikolon · Zeitstempel in UTC, Zeitdauern in HH:MM.</p></section>`
   );
 }
 function settingsPage() {
@@ -401,9 +422,8 @@ function absenceForm(date, a, rev = revision) {
       "",
     )}</select><label for="absence-comment">Kommentar (optional)</label><input id="absence-comment" name="comment" value="${esc(a?.comment)}" maxlength="10000"><div class="actions"><button type="submit">Abwesenheit speichern</button></div><p class="note">Urlaub, Krankheit und Feiertage reduzieren das Soll. Freizeitausgleich baut Gleitzeit ab. Vorhandene Abwesenheiten im Zeitraum werden nicht überschrieben.</p></form>`;
 }
-function editSession(s, date = selectedDate) {
-  const isNew = !s,
-    rev = Number(body.dataset.revision ?? revision);
+function editSession(s, date = selectedDate, rev = Number(body.dataset.revision ?? revision)) {
+  const isNew = !s;
   s = s || {
     date,
     start: new Date(date + "T09:00:00").getTime(),
@@ -418,7 +438,7 @@ function editSession(s, date = selectedDate) {
       .map(pauseFields)
       .join(
         "",
-      )}</div><button class="ghost" type="button" data-action="pause-add">+ Pause ergänzen</button><p class="note">Beginn und Ende müssen am selben Kalendertag liegen. Eine bereits über Mitternacht laufende Erfassung wird hier bewusst korrigiert. Bei Sommerzeitwechseln bitte den resultierenden Zeitstempel im Backup prüfen; doppelte lokale Uhrzeiten sind im Editor nicht unterscheidbar.</p><div class="actions"><button class="primary" type="submit">Arbeitsblock speichern</button><button type="button" class="ghost" data-action="day" data-date="${s.date}">Zurück zum Tag</button></div></form>`,
+      )}</div><button class="ghost" type="button" data-action="pause-add">+ Pause ergänzen</button><p class="note">${s.autoStop ? "Dieser automatisch beendete Block kann bis nach Mitternacht reichen." : "Beginn und Ende müssen am selben Kalendertag liegen."} Bei Sommerzeitwechseln bitte den resultierenden Zeitstempel im Backup prüfen; doppelte lokale Uhrzeiten sind im Editor nicht unterscheidbar.</p><div class="actions"><button class="primary" type="submit">Arbeitsblock speichern</button><button type="button" class="ghost" data-action="day" data-date="${s.date}">Zurück zum Tag</button></div></form>`,
   );
 }
 function confirmDelete(title, change, expected = revision) {
@@ -449,11 +469,20 @@ document.addEventListener("click", async (event) => {
       if (performance.now() < trackUntil) return;
       trackUntil = performance.now() + 650;
       setTimeout(syncTrackButtons, 670);
+      if (await checkAutomaticEnd()) return;
       await save((d) => C.transition(d, b.dataset.track), {
         close: false,
         message: "Erfassung gespeichert.",
       });
     }
+    if (action === "auto-edit")
+      editSession(data.sessions.find((s) => s.id === entryId), undefined, revision);
+    if (action === "auto-confirm")
+      await save((d) => {
+        const session = d.sessions.find((s) => s.id === entryId);
+        if (session?.autoStop === "pending") session.autoStop = "reviewed";
+        return d;
+      }, { message: "Automatisch erfasste Zeit bestätigt." });
     if (action === "day") showDay(date);
     if (action === "month") {
       const d = new Date(month + "-01T12:00:00");
@@ -647,7 +676,8 @@ document.addEventListener("submit", async (e) => {
       const start = stamp(v.start),
         end = v.end ? stamp(v.end) : null,
         date = C.dateKey(new Date(start));
-      if (end !== null && C.dateKey(new Date(end)) !== date)
+      if (end !== null && C.dateKey(new Date(end)) !== date &&
+          !data.sessions.find((s) => s.id === v.id)?.autoStop)
         throw Error(
           "Beginn und Ende müssen am selben Tag liegen. Bitte den über Mitternacht laufenden Block ausdrücklich korrigieren.",
         );
@@ -676,6 +706,7 @@ document.addEventListener("submit", async (e) => {
             date,
             start,
             end,
+            ...(old?.autoStop && end !== null ? { autoStop: "reviewed" } : {}),
             factor: Number(v.factor),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             comment: v.comment,
@@ -873,25 +904,27 @@ async function registerSW() {
     notify("Offline-Vorbereitung fehlgeschlagen: " + e.message, true);
   }
 }
-setInterval(() => {
+let displayedDate = today();
+setInterval(async () => {
   if (!data || document.hidden) return;
-  const drift = Date.now() - baseClock - (performance.now() - baseMono);
-  if (Math.abs(drift) > 120000 && !clockWarning) {
-    clockWarning = true;
-    if (currentView() === "today") $("#clock-warning").innerHTML = warnings();
+  await checkAutomaticEnd();
+  const date = today();
+  if (date !== displayedDate && !app.querySelector('form[data-dirty="true"]')) {
+    displayedDate = date;
+    render();
   }
   if (currentView() === "today") {
+    $("#clock-warning").innerHTML = warnings();
     const v = todayValues().values;
     document
       .querySelectorAll("[data-live]")
       .forEach((el) => (el.textContent = v[el.dataset.live]));
-    const currentDate = $("[data-action=day]")?.dataset.date;
-    if (currentDate !== today()) render();
   }
 }, 1000);
 try {
   ({ data, revision } = await load());
   render();
+  await checkAutomaticEnd();
   registerSW();
 } catch (e) {
   app.innerHTML =
